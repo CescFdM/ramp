@@ -1,0 +1,11 @@
+{
+  "timezone": "Europe/Berlin",
+  "goal": "Hybrid athlete: build muscle with weight training while building endurance for running and cycling events. Progress load steadily without spiking fatigue.",
+  "daysPerWeek": 5,
+  "constraints": [
+    "Example: Saturday long outdoor ride, about 90 km at endurance pace (delete this line)"
+  ],
+  "ftp_watts": null,
+  "run_threshold_pace": null,
+  "notes": "Edit this file on GitHub (pencil icon) any time. The next morning's plan will respect it. Use constraints for events, travel, injuries or fixed sessions."
+}
