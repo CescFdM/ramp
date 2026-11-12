@@ -1,6 +1,6 @@
 // Everything is network-first (always fresh when online) and falls back to the last cached copy
 // when offline, so the installed app still opens without a connection. Bump VERSION when the shell files change.
-const VERSION = "ramp-v2";
+const VERSION = "ramp-v3";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "charts.js", "crypto.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
@@ -13,7 +13,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
   if (url.pathname.endsWith("/data.enc")) {
-    e.respondWith(fetch(e.request).then((r) => {
+    e.respondWith(fetch(e.request, { cache: "no-store" }).then((r) => {
       if (r.ok) { const copy = r.clone(); caches.open(VERSION).then((c) => c.put("data.enc", copy)); }
       return r;
     }).catch(() => caches.match("data.enc")));
@@ -21,7 +21,8 @@ self.addEventListener("fetch", (e) => {
   }
   // Network-first for the shell too: a deploy shows up on the next open (not one reload late).
   // The cache is only the offline fallback.
-  e.respondWith(fetch(e.request).then((r) => {
+  // cache: "no-cache" = always revalidate with the server (cheap 304), bypassing GitHub Pages' 10 minute max-age.
+  e.respondWith(fetch(e.request, { cache: "no-cache" }).then((r) => {
     if (r.ok) { const copy = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
     return r;
   }).catch(() => caches.match(e.request, { ignoreSearch: true })));

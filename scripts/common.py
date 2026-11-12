@@ -100,6 +100,7 @@ def assemble(state, cfg=None):
     details = {k: v for k, v in state.get("details", {}).items() if k in recent_ids}
     return {
         "generated_at": datetime.now(tz(cfg)).isoformat(timespec="seconds"),
+        "build": (os.environ.get("GITHUB_SHA") or "local")[:7],
         "today": today.isoformat(),
         "timezone": cfg.get("timezone"),
         "profile": {"goal": cfg.get("goal"), "daysPerWeek": cfg.get("daysPerWeek")},

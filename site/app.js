@@ -143,7 +143,7 @@ function render() {
   const D = S.data;
   tabsEl.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === S.tab)));
   const t = new Date(D.generated_at);
-  metaEl.textContent = "Synced " + t.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  metaEl.textContent = "Synced " + t.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) + (D.build ? " · build " + D.build : "");
   bannerEl.replaceChildren();
   const failures = D.sync && D.sync.failures && Object.keys(D.sync.failures).length;
   if (failures) bannerEl.append(h("div", { class: "banner" }, `Garmin didn't return some data (${Object.keys(D.sync.failures).join(", ")}). Related charts may be incomplete.`));

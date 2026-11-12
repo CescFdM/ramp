@@ -13,7 +13,7 @@ import os
 import sys
 import tarfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from common import (DAILY_DAYS, DETAIL_DAYS, HISTORY_DAYS, load_config, load_state,
                     save_state, sport_group, today_local)
@@ -201,6 +201,8 @@ def fetch_day(api, day):
             row["rhr"] = (sleep or {}).get("restingHeartRate")
     mm = api.call("get_max_metrics", iso)  # account-level VO2max, independent of any single activity
     mm = mm[0] if isinstance(mm, list) and mm else mm
+    if day == date.today() or os.environ.get("DEBUG_VO2"):
+        log("get_max_metrics", iso, "->", (list(mm.keys()), {k: (list(v.keys()) if isinstance(v, dict) else v) for k, v in mm.items()}) if isinstance(mm, dict) else repr(mm)[:200])
     if isinstance(mm, dict):
         vo2 = {"run": g(mm, "generic", "vo2MaxPreciseValue") or g(mm, "generic", "vo2MaxValue"),
                "bike": g(mm, "cycling", "vo2MaxPreciseValue") or g(mm, "cycling", "vo2MaxValue")}
