@@ -193,7 +193,13 @@ function statsView() {
     const [txt, tone] = r < 0.8 ? ["Low, room to build", ""] : r <= 1.3 ? ["Sweet spot", "good"] : r <= 1.5 ? ["High, watch fatigue", "warn"] : ["Very high", "bad"];
     tiles.append(tile("Acute : chronic load", r.toFixed(2), "", txt, tone));
   }
-  const vo = (g) => { const a = D.activities.filter((x) => x.sport_group === g && x.vo2max).pop(); return a ? a.vo2max : null; };
+  // Prefer Garmin's account-level daily estimate (what the Garmin app shows); fall back to per-activity values.
+  const vo = (g) => {
+    const day = recent.find((d) => d.vo2 && d.vo2[g]);
+    if (day) return day.vo2[g];
+    const a = D.activities.filter((x) => x.sport_group === g && x.vo2max).pop();
+    return a ? a.vo2max : null;
+  };
   const vr = vo("run") ?? (D.training_status && D.training_status.vo2_run), vb = vo("bike") ?? (D.training_status && D.training_status.vo2_bike);
   if (vr || vb) tiles.append(tile("VO₂max", vr ? Number(vr).toFixed(1) : Number(vb).toFixed(1), "", vr && vb ? `Run · bike ${Number(vb).toFixed(1)}` : vr ? "Running" : "Cycling"));
   const bb = latest((d) => d.bb_high);
@@ -263,12 +269,14 @@ function statsView() {
   /* fitness + body (at least 90 days: these update rarely) */
   const long = lastDays(D.today, Math.max(n, 90)), lLabels = long.map(fmtShort), lTitles = long.map(fmtFull);
   const vSeries = (g, color, name) => {
-    const m = {}; D.activities.filter((a) => a.sport_group === g && a.vo2max).forEach((a) => (m[a.date] = a.vo2max));
+    const m = {};
+    D.activities.filter((a) => a.sport_group === g && a.vo2max).forEach((a) => (m[a.date] = a.vo2max));
+    D.daily.forEach((d) => { if (d.vo2 && d.vo2[g]) m[d.date] = d.vo2[g]; }); // account-level value wins
     return { name, color, values: long.map((d) => (m[d] != null ? m[d] : null)) };
   };
   const vs = [vSeries("run", "var(--run)", "Running"), vSeries("bike", "var(--bike)", "Cycling")].filter((x) => x.values.some((v) => v != null));
   if (vs.length) {
-    wrap.append(chartCard({ title: "VO₂max", sub: "From your runs and rides, last " + long.length + " days" }, (host) =>
+    wrap.append(chartCard({ title: "VO₂max", sub: "Garmin's estimate, last " + long.length + " days" }, (host) =>
       lineChart(host, { title: "VO2max", labels: lLabels, titles: lTitles, spanGaps: true, series: vs, yFmt: (v) => v.toFixed(0), valFmt: (v) => Number(v).toFixed(1) })));
   }
   const wm = Object.fromEntries(D.weights.map((w) => [w.date, w]));

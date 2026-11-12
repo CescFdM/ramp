@@ -199,6 +199,14 @@ def fetch_day(api, day):
         }
         if row.get("rhr") is None:
             row["rhr"] = (sleep or {}).get("restingHeartRate")
+    mm = api.call("get_max_metrics", iso)  # account-level VO2max, independent of any single activity
+    mm = mm[0] if isinstance(mm, list) and mm else mm
+    if isinstance(mm, dict):
+        vo2 = {"run": g(mm, "generic", "vo2MaxPreciseValue") or g(mm, "generic", "vo2MaxValue"),
+               "bike": g(mm, "cycling", "vo2MaxPreciseValue") or g(mm, "cycling", "vo2MaxValue")}
+        vo2 = {k: round(float(v), 1) for k, v in vo2.items() if v}
+        if vo2:
+            row["vo2"] = vo2
     hrv = api.call("get_hrv_data", iso)
     s = g(hrv, "hrvSummary", default=None) if hrv else None
     if s:

@@ -28,6 +28,7 @@ for i in range(120):
         "hrv": {"last": hrv, "weekly": hrv - 1, "status": random.choice(["BALANCED", "BALANCED", "BALANCED", "UNBALANCED"]),
                 "low": 46, "high": 62},
     }
+    state["daily"][d.isoformat()]["vo2"] = {"run": round(49 + 1.6 * trend + random.gauss(0, .15), 1), "bike": round(51 + 1.2 * trend + random.gauss(0, .15), 1)}
     if i > 112:
         state["daily"][d.isoformat()]["readiness"] = {"score": random.randint(45, 90), "level": "MODERATE"}
     if i % 5 == 0:
