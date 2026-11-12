@@ -35,6 +35,11 @@ for i in range(120):
         state["weights"][d.isoformat()] = {"kg": round(78.4 + 1.2 * trend + random.gauss(0, .3), 1), "fat": round(17.5 - 1.2 * trend, 1),
                                            "muscle_kg": round(35.2 + 0.8 * trend, 1)}
 
+# make the latest day trip several highlight levels (for UI testing)
+_last = state["daily"][max(state["daily"])]
+_last["rhr"] = 58; _last["hrv"]["status"] = "LOW"; _last["bb_high"] = 72
+_last["sleep"].update({"total": int(5.4 * 3600), "score": 62})
+
 # ---- activities
 week = ["strength_training", "running", "cycling", None, "running", "strength_training", "cycling"]
 aid = 1000
@@ -98,7 +103,7 @@ for k, a in state["activities"].items():
         det["hr_zones"] = [{"zone": i + 1, "secs": s, "low": [100, 120, 140, 158, 175][i]} for i, s in enumerate([900, 1200, 500, 120, 0])]
     state["details"][k] = det
 
-state["meta"]["training_status"] = {"phrase": "PRODUCTIVE_1", "acute": 612, "chronic": 560, "ratio": 1.1, "vo2_run": 50.1, "vo2_bike": 52.3}
+state["meta"]["training_status"] = {"phrase": "MAINTAINING_1", "acute": 612, "chronic": 560, "ratio": 1.1, "vo2_run": 50.1, "vo2_bike": 52.3}
 dates = [(today + timedelta(days=i)).isoformat() for i in range(7)]
 state["plan"] = {
     "generated_at": datetime.now(tz=None).astimezone().isoformat(timespec="seconds"), "model": "demo", "stale": False,

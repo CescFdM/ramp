@@ -1,6 +1,7 @@
 """Shared helpers: paths, state IO, derived metrics, assembling the site payload."""
 import json
 import os
+import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -15,9 +16,39 @@ DAILY_DAYS = 120     # wellness days kept
 DETAIL_DAYS = 7      # activities with full detail (charts, splits, route)
 
 
+def _lenient_json(text):
+    """json.loads that tolerates trailing commas (a common hand-editing slip on GitHub)."""
+    return json.loads(re.sub(r",\s*([\]}])", r"\1", text))
+
+
 def load_config():
     with open(CONFIG) as f:
-        return json.load(f)
+        return _lenient_json(f.read())
+
+
+def clean_constraints(items):
+    out = []
+    for c in items or []:
+        c = " ".join(str(c).split())[:300]
+        if c and "(delete this line)" not in c and c not in out:
+            out.append(c)
+    return out[:30]
+
+
+def migrate_legacy_constraints(state):
+    """Constraints used to live in the public config/athlete.json. Import them once into the
+    encrypted state and remove them from the file. Returns True if the file was rewritten."""
+    with open(CONFIG) as f:
+        cfg = _lenient_json(f.read())
+    legacy = cfg.pop("constraints", None)
+    if legacy is None:
+        return False
+    if "constraints" not in state:
+        state["constraints"] = clean_constraints(legacy)
+    with open(CONFIG, "w") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return True
 
 
 def tz(cfg=None):
@@ -87,6 +118,65 @@ def compute_load_series(activities, start, end):
     return out
 
 
+LEVEL_LABEL = {1: "Watch", 2: "Warning", 3: "Alert"}
+
+
+def _avg(vals):
+    vals = [v for v in vals if v is not None]
+    return sum(vals) / len(vals) if vals else None
+
+
+def compute_flags(daily, training_status, cfg, today):
+    """Stat highlights shared by the app and the planner. level 1 yellow, 2 orange, 3 red.
+    Only data from today or yesterday counts, so a stale value never raises an alert."""
+    th = {"rhr_delta": 2, "sleep_score_min": 70, "sleep_hours_min": 6, "body_battery_min": 80, **cfg.get("thresholds", {})}
+    levels = cfg.get("levels", {})
+    fresh_from = (today - timedelta(days=1)).isoformat()
+    fresh = [d for d in reversed(daily) if d["date"] >= fresh_from]
+    flags = {}
+
+    def latest(fn):
+        for d in fresh:
+            v = fn(d)
+            if v is not None:
+                return v, d
+        return None
+
+    r = latest(lambda d: d.get("rhr"))
+    if r:
+        val, day = r
+        base = _avg([x.get("rhr") for x in [x for x in daily if x["date"] < day["date"]][-30:]])
+        if base and val - base > th["rhr_delta"]:
+            flags["rhr"] = {"level": 3, "text": f"+{val - base:.1f} vs 30d avg"}
+    h = latest(lambda d: (d.get("hrv") or {}).get("status"))
+    if h:
+        status = str(h[0]).upper()
+        lvl = levels.get("hrv", {}).get(status)
+        if lvl:
+            flags["hrv"] = {"level": lvl, "text": status.capitalize()}
+    sl = latest(lambda d: (d.get("sleep") or {}).get("total"))
+    if sl:
+        total, day = sl
+        score, reasons = (day["sleep"] or {}).get("score"), []
+        if score is not None and score < th["sleep_score_min"]:
+            reasons.append(f"Score {score}")
+        if total / 3600 < th["sleep_hours_min"]:
+            reasons.append(f"{int(total // 3600)}h {int(total % 3600 // 60):02d}m")
+        if reasons:
+            flags["sleep"] = {"level": 3, "text": " · ".join(reasons)}
+    bb = latest(lambda d: d.get("bb_high"))
+    if bb and bb[0] < th["body_battery_min"]:
+        flags["body_battery"] = {"level": 3, "text": f"Peak only {bb[0]}"}
+    phrase = re.sub(r"_\d+$", "", str((training_status or {}).get("phrase") or "")).upper()
+    for key, lvl in levels.get("training_status", {}).items():
+        if phrase.startswith(key):
+            flags["status"] = {"level": lvl, "text": phrase.capitalize()}
+            break
+    for f in flags.values():
+        f["label"] = LEVEL_LABEL.get(f["level"], "")
+    return flags
+
+
 def assemble(state, cfg=None):
     """Build the payload the website decrypts. Everything the UI needs, nothing else."""
     cfg = cfg or load_config()
@@ -109,6 +199,8 @@ def assemble(state, cfg=None):
         "activities": acts,
         "load": compute_load_series(acts, start, today),
         "training_status": state.get("meta", {}).get("training_status"),
+        "flags": compute_flags(daily, state.get("meta", {}).get("training_status"), cfg, today),
+        "constraints": state.get("constraints", []),
         "details": details,
         "plan": state.get("plan"),
         "sync": state.get("meta", {}).get("sync"),

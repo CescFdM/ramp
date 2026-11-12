@@ -1,6 +1,6 @@
 // Everything is network-first (always fresh when online) and falls back to the last cached copy
 // when offline, so the installed app still opens without a connection. Bump VERSION when the shell files change.
-const VERSION = "ramp-v3";
+const VERSION = "ramp-v4";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "charts.js", "crypto.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

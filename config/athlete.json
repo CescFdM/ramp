@@ -6,7 +6,17 @@
     "I do a team time trial on Zwift every Thursday, at 7am Berlin. Before that, I usually complete the Zwift workout named Ultimate Warm Up",
     "Never schedule heavy leg strength the day before a long run or a hard cycling session"
   ],
+  "thresholds": {
+    "rhr_delta": 2,
+    "sleep_score_min": 70,
+    "sleep_hours_min": 6,
+    "body_battery_min": 80
+  },
+  "levels": {
+    "hrv": { "UNBALANCED": 1, "LOW": 2, "POOR": 3 },
+    "training_status": { "MAINTAINING": 1, "DETRAINING": 2, "OVERREACHING": 3, "STRAINED": 3 }
+  },
   "ftp_watts": null,
   "run_threshold_pace": null,
-  "notes": "Edit this file on GitHub (pencil icon) any time. The next morning's plan will respect it. Use constraints for events, travel, injuries or fixed sessions."
+  "notes": "Goal, days per week and the stat-highlight thresholds live here (levels: 1 yellow, 2 orange, 3 red). Constraints are managed in the app (Plan > Generate Plan) and stored encrypted. Any constraints still listed above are imported into the encrypted history on the next run and removed from this file automatically."
 }

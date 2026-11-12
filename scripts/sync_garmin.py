@@ -15,7 +15,7 @@ import tarfile
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from common import (DAILY_DAYS, DETAIL_DAYS, HISTORY_DAYS, load_config, load_state,
+from common import (DAILY_DAYS, DETAIL_DAYS, HISTORY_DAYS, load_config, load_state, migrate_legacy_constraints,
                     save_state, sport_group, today_local)
 
 ACTIVITY_REFRESH_DAYS = 14
@@ -226,6 +226,8 @@ def main():
     state = load_state()
     state.setdefault("daily", {}), state.setdefault("activities", {})
     state.setdefault("details", {}), state.setdefault("weights", {}), state.setdefault("meta", {})
+    if migrate_legacy_constraints(state):
+        log("constraints moved from config/athlete.json into the encrypted history")
     api = Api(login())
 
     # --- activities: refresh only a recent window and merge it into the stored history ------------
