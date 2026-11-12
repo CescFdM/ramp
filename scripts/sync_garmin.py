@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from common import (DAILY_DAYS, DETAIL_DAYS, HISTORY_DAYS, load_config, load_state,
                     save_state, sport_group, today_local)
 
+ACTIVITY_REFRESH_DAYS = 14
 TOKENDIR = os.path.expanduser(os.environ.get("GARMINTOKENS", "~/.garminconnect"))
 
 
@@ -227,13 +228,21 @@ def main():
     state.setdefault("details", {}), state.setdefault("weights", {}), state.setdefault("meta", {})
     api = Api(login())
 
-    # --- activities: full refresh of the window (one paged call) -------------------------
-    start = today - timedelta(days=HISTORY_DAYS)
-    raw = api.call("get_activities_by_date", start.isoformat(), today.isoformat()) or []
-    acts = {str(a["activityId"]): summarize_activity(a) for a in raw if a.get("activityId")}
-    if acts:
-        state["activities"] = acts
-    log(f"{len(acts)} activities in the last {HISTORY_DAYS} days")
+    # --- activities: refresh only a recent window and merge it into the stored history ------------
+    # (first run / empty state: pull the whole HISTORY_DAYS once). Inside the window the fresh result
+    # replaces what was stored, so renames, edits and deletions in Garmin are picked up.
+    backfill = int(os.environ.get("BACKFILL_DAYS") or 30)
+    window = HISTORY_DAYS if not state["activities"] else max(ACTIVITY_REFRESH_DAYS, backfill if os.environ.get("BACKFILL_DAYS") else 0)
+    start = today - timedelta(days=window)
+    raw = api.call("get_activities_by_date", start.isoformat(), today.isoformat())
+    if raw is None:
+        log("activity call failed; keeping stored activities")
+    else:
+        fresh = {str(a["activityId"]): summarize_activity(a) for a in raw if a.get("activityId")}
+        oldest = (today - timedelta(days=HISTORY_DAYS)).isoformat()
+        kept = {k: v for k, v in state["activities"].items() if oldest <= v["date"] < start.isoformat()}
+        state["activities"] = {**kept, **fresh}
+        log(f"activities: refreshed last {window} days ({len(fresh)} found), {len(state['activities'])} stored in total")
 
     # --- activity detail for the last 7 days (cached by id) ------------------------------
     cutoff = (today - timedelta(days=DETAIL_DAYS - 1)).isoformat()
@@ -247,14 +256,25 @@ def main():
     # --- wellness: missing days + last 3 days (Garmin revises recent sleep/HRV) ------------
     # Only look back BACKFILL_DAYS for gaps (default 30). History older than that accumulates
     # forward day by day; raise BACKFILL_DAYS on a manual run to pull more.
-    backfill = int(os.environ.get("BACKFILL_DAYS") or 30)
     days = [today - timedelta(days=i) for i in range(DAILY_DAYS)]
-    todo = [d for d in days[:backfill] if d.isoformat() not in state["daily"] or d >= today - timedelta(days=2)]
+    def needs_fetch(d):
+        row = state["daily"].get(d.isoformat())
+        if row is None or d >= today - timedelta(days=2):
+            return True
+        return bool(row.get("partial")) and d >= today - timedelta(days=7)  # an earlier call errored: retry for a week
+    todo = [d for d in days[:backfill] if needs_fetch(d)]
     log(f"fetching {len(todo)} wellness days (backfill window {backfill} days)")
     for d in sorted(todo):
+        failed_before = sum(api.failures.values())
         row = fetch_day(api, d)
+        if row and sum(api.failures.values()) > failed_before:
+            row["partial"] = True
         if row:
             state["daily"][d.isoformat()] = row
+        elif d < today - timedelta(days=3) and sum(api.failures.values()) == failed_before:
+            # Garmin answered cleanly and had nothing (e.g. watch not worn): remember it, don't ask again.
+            # A day whose calls errored is NOT remembered, so it is retried next run.
+            state["daily"][d.isoformat()] = {}
         time.sleep(0.3)
     keep = {d.isoformat() for d in days}
     state["daily"] = {k: v for k, v in state["daily"].items() if k in keep}
