@@ -4,6 +4,7 @@
   "daysPerWeek": 5,
   "constraints": [
     "I do a team time trial on Zwift every Thursday, at 7am Berlin. Before that, I usually complete the Zwift workout named Ultimate Warm Up",
+    "Never schedule heavy leg strength the day before a long run or a hard cycling session"
   ],
   "ftp_watts": null,
   "run_threshold_pace": null,
