@@ -1,25 +1,38 @@
 name: Refresh Ramp
 
-# GitHub cron runs in UTC and has no time zones, so each slot is listed for both winter (CET, UTC+1)
-# and summer (CEST, UTC+2) and the "gate" step only lets the one that lands in the right local
-# window through. Local targets: 06:15 Mon-Fri, 08:00 Sat-Sun (Europe/Berlin).
-# Scheduled runs are often delayed 5-30 min; the gate accepts the whole local hour.
+run-name: Ramp ${{ github.event_name == 'workflow_dispatch' && inputs.mode || github.event_name }}
+
+# Modes
+#   data           sync Garmin and redeploy (free: no Claude call). Scheduled + on code pushes.
+#   plan           sync, then Claude plans the requested dates (max 7 days). Started from the app.
+#   refresh_today  sync, then Claude re-balances only today's session. Started from the app.
+#
+# plan / refresh_today need an encrypted `payload` made by the app with your site key (dates, constraints,
+# note). Workflow inputs are public on a public repo, so they only ever carry ciphertext.
+#
+# GitHub cron is UTC with no time zones, so each slot is listed for winter (CET) and summer (CEST) and
+# the gate step lets through only the one that lands in the right Berlin hour:
+# 06:15 Mon-Fri and 08:00 Sat-Sun, data only. Scheduled runs are often delayed by 5-30 minutes.
 on:
   schedule:
     - cron: "15 4 * * 1-5"   # 06:15 CEST
     - cron: "15 5 * * 1-5"   # 06:15 CET
     - cron: "0 6 * * 6,0"    # 08:00 CEST
     - cron: "0 7 * * 6,0"    # 08:00 CET
-    - cron: "5 9-20/3 * * *" # data only refresh every 3 h (keeps Past activities current, no new plan)
+    - cron: "5 9-20/3 * * *" # data refresh every 3 h during the day
   workflow_dispatch:
     inputs:
       mode:
-        description: "full = sync + new plan, data = sync only"
-        default: full
+        description: "data = sync only, plan / refresh_today = started from the app"
+        default: data
         type: choice
-        options: [full, data]
+        options: [data, plan, refresh_today]
+      payload:
+        description: "Encrypted request from the app (leave empty for data)"
+        default: ""
+        type: string
       backfill_days:
-        description: "How many days of sleep/HRV/resting HR to fetch if missing (first run: 30 is plenty)"
+        description: "How many days of sleep/HRV/resting HR to fetch if missing"
         default: "30"
   push:
     branches: [main]
@@ -50,26 +63,22 @@ jobs:
 
       - name: Decide what to do
         id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
         run: |
-          event="${{ github.event_name }}"
           dow=$(TZ=$TZ_NAME date +%u); hour=$(TZ=$TZ_NAME date +%H); hour=$((10#$hour))
-          mode=full; run=true
-          if [ "$event" = "schedule" ]; then
-            cron="${{ github.event.schedule }}"
-            if [ "$cron" = "5 9-20/3 * * *" ]; then
-              mode=data
-            else
-              # morning slots: only the one that is actually 06:xx (weekday) / 08:xx (weekend) local
-              if [ "$dow" -le 5 ] && [ "$hour" -ne 6 ]; then run=false; fi
-              if [ "$dow" -ge 6 ] && [ "$hour" -ne 8 ]; then run=false; fi
-            fi
-          elif [ "$event" = "workflow_dispatch" ]; then
-            mode="${{ github.event.inputs.mode }}"
-          else
-            mode=data   # a code push rebuilds the site without spending an API call
+          mode=data; run=true
+          if [ "$EVENT" = "schedule" ] && [ "$CRON" != "5 9-20/3 * * *" ]; then
+            # morning slots: only the one that is actually 06:xx (weekday) / 08:xx (weekend) in Berlin
+            if [ "$dow" -le 5 ] && [ "$hour" -ne 6 ]; then run=false; fi
+            if [ "$dow" -ge 6 ] && [ "$hour" -ne 8 ]; then run=false; fi
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            mode="${INPUT_MODE:-data}"
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"; echo "mode=$mode" >> "$GITHUB_OUTPUT"
-          echo "event=$event local_dow=$dow local_hour=$hour mode=$mode run=$run"
+          echo "event=$EVENT local_dow=$dow local_hour=$hour mode=$mode run=$run"
 
       - uses: actions/setup-python@v5
         if: steps.gate.outputs.run == 'true'
@@ -81,6 +90,21 @@ jobs:
       - name: Install
         if: steps.gate.outputs.run == 'true'
         run: pip install -r scripts/requirements.txt
+
+      - name: Read the app's request
+        if: steps.gate.outputs.run == 'true' && steps.gate.outputs.mode != 'data'
+        env:
+          PAYLOAD: ${{ github.event.inputs.payload }}
+        run: |
+          mkdir -p build
+          if [ -z "$PAYLOAD" ]; then
+            echo "::error::No request payload. Plans are started from the app (Plan tab), which encrypts the request."; exit 1
+          fi
+          printf '%s' "$PAYLOAD" > build/request.enc
+          if ! node scripts/crypt.mjs decrypt build/request.enc build/request.json; then
+            echo "::error::Could not decrypt the request. Sign out and in again in the app (the site password may have changed)."; exit 1
+          fi
+          echo "request decrypted ($(wc -c < build/request.json) bytes)"
 
       - name: Restore history (encrypted)
         if: steps.gate.outputs.run == 'true'
@@ -97,11 +121,12 @@ jobs:
           BACKFILL_DAYS: ${{ github.event.inputs.backfill_days }}
         run: python scripts/sync_garmin.py
 
-      - name: Generate today's plan
-        if: steps.gate.outputs.run == 'true' && steps.gate.outputs.mode == 'full'
+      - name: Claude plan
+        if: steps.gate.outputs.run == 'true' && steps.gate.outputs.mode != 'data'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          PLAN_MODE: ${{ steps.gate.outputs.mode }}
         run: python scripts/plan.py
 
       - name: Assemble and encrypt
@@ -116,7 +141,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           git config user.name "ramp-bot"; git config user.email "ramp-bot@users.noreply.github.com"
-          git add state/state.enc config/salt.txt
+          git add state/state.enc config/salt.txt config/athlete.json
           if ! git diff --cached --quiet; then
             git commit -m "Update history $(date -u '+%F %H:%M')"
             git pull --rebase origin "${GITHUB_REF_NAME}" || true
