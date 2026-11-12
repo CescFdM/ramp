@@ -22,6 +22,6 @@
     }
   },
   "ftp_watts": 206,
-  "run_threshold_pace": "4:26",
+  "run_threshold_pace": "4:50",
   "notes": "Goal, days per week and the stat-highlight thresholds live here (levels: 1 yellow, 2 orange, 3 red). Constraints are managed in the app (Plan > Generate Plan) and stored encrypted. Any constraints still listed above are imported into the encrypted history on the next run and removed from this file automatically."
 }
