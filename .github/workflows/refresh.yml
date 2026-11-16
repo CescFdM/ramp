@@ -10,16 +10,16 @@ run-name: Ramp ${{ github.event_name == 'workflow_dispatch' && inputs.mode || gi
 # plan / refresh_today need an encrypted `payload` made by the app with your site key (dates, constraints,
 # note). Workflow inputs are public on a public repo, so they only ever carry ciphertext.
 #
-# GitHub cron is UTC with no time zones, so each slot is listed for winter (CET) and summer (CEST) and
-# the gate step lets through only the one that lands in the right Berlin hour:
-# 06:15 Mon-Fri and 08:00 Sat-Sun, data only. Scheduled runs are often delayed by 5-30 minutes.
+# GitHub cron is UTC with no time zones, so each morning slot is listed for winter (CET) and summer (CEST):
+# 06:15 Mon-Fri and 08:00 Sat-Sun, data only. GitHub often delays scheduled runs (minutes, sometimes hours),
+# so every scheduled trigger syncs (no hour gate); one of the two slots may therefore run as a duplicate.
 on:
   schedule:
     - cron: "15 4 * * 1-5"   # 06:15 CEST
     - cron: "15 5 * * 1-5"   # 06:15 CET
     - cron: "0 6 * * 6,0"    # 08:00 CEST
     - cron: "0 7 * * 6,0"    # 08:00 CET
-    - cron: "5 9-20/3 * * *" # data refresh every 3 h during the day
+    - cron: "5 5-20/3 * * *" # data refresh every 3 h from early morning (UTC 05:05-20:05)
   workflow_dispatch:
     inputs:
       mode:
@@ -70,11 +70,9 @@ jobs:
         run: |
           dow=$(TZ=$TZ_NAME date +%u); hour=$(TZ=$TZ_NAME date +%H); hour=$((10#$hour))
           mode=data; run=true
-          if [ "$EVENT" = "schedule" ] && [ "$CRON" != "5 9-20/3 * * *" ]; then
-            # morning slots: only the one that is actually 06:xx (weekday) / 08:xx (weekend) in Berlin
-            if [ "$dow" -le 5 ] && [ "$hour" -ne 6 ]; then run=false; fi
-            if [ "$dow" -ge 6 ] && [ "$hour" -ne 8 ]; then run=false; fi
-          elif [ "$EVENT" = "workflow_dispatch" ]; then
+          # Scheduled runs always sync. GitHub can delay a cron by hours, so a "right Berlin hour" gate
+          # would throw away the delayed morning runs. Syncs are free and idempotent; extra ones are harmless.
+          if [ "$EVENT" = "workflow_dispatch" ]; then
             mode="${INPUT_MODE:-data}"
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"; echo "mode=$mode" >> "$GITHUB_OUTPUT"

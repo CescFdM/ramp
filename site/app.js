@@ -125,12 +125,12 @@ async function reload(manual) {
 }
 
 /* ------------------------------------------------------------------ shell */
-let mainEl, metaEl, bannerEl, tabsEl;
+let mainEl, metaEl, bannerEl, tabsEl, refreshBtn;
 function start() {
   metaEl = h("div", { class: "meta" });
   mainEl = h("main", {});
   bannerEl = h("div", {});
-  const refresh = h("button", { class: "icon-btn", type: "button", "aria-label": "Refresh data", onclick: () => reload(true) }, icon("refresh", 18));
+  const refresh = refreshBtn = h("button", { class: "icon-btn", type: "button", "aria-label": "Sync Garmin and refresh", title: "Sync Garmin and refresh", onclick: syncGarmin }, icon("refresh", 18));
   const lock = h("button", { class: "icon-btn", type: "button", "aria-label": "Sign out", onclick: async () => { await clearKey(); await clearToken(); await saveJob(null); location.reload(); } }, icon("lock", 18));
   tabsEl = h("nav", { class: "tabs", role: "tablist" }, ["stats|Athlete stats", "acts|Activities", "plan|Plan"].map((t) => {
     const [id, label] = t.split("|");
@@ -153,6 +153,10 @@ function render() {
   bannerEl.replaceChildren();
   const failures = D.sync && D.sync.failures && Object.keys(D.sync.failures).length;
   if (failures) bannerEl.append(h("div", { class: "banner" }, `Garmin didn't return some data (${Object.keys(D.sync.failures).join(", ")}). Related charts may be incomplete.`));
+  if (S.job) bannerEl.append(h("div", { class: "banner job", id: "job-banner", role: "status" }, h("span", {}, "")));
+  if (S.jobError) bannerEl.append(h("div", { class: "banner warn" }, h("strong", {}, "That didn't work. "), S.jobError.msg + " ", S.jobError.url ? h("a", { href: S.jobError.url, target: "_blank", rel: "noopener noreferrer" }, "Open the run") : null));
+  if (S.job) updateJobBanner();
+  if (refreshBtn) { refreshBtn.classList.toggle("spinning", !!S.job); refreshBtn.disabled = !!S.job; }
   mainEl.replaceChildren(S.tab === "stats" ? statsView() : S.tab === "acts" ? actsView() : planView());
 }
 
@@ -528,10 +532,18 @@ const todayDone = () => {
 };
 const addDays = (iso, n) => new Date(new Date(iso + "T12:00:00Z").getTime() + n * 864e5).toISOString().slice(0, 10);
 
+/* the top-right button: start a data sync on GitHub Actions (needs the token), then watchJob loads the result */
+async function syncGarmin() {
+  if (S.job) return;
+  const go = async () => { S.jobError = null; try { await startJob("data", {}); } catch (e) { S.jobError = { msg: e.message }; render(); } };
+  if (S.token) go(); else tokenSheet(go);
+}
+
 async function startJob(mode, request) {
   const t0 = Date.now();
-  const payload = await encryptJson({ mode, ...request }, S.key, S.meta.salt, S.meta.iter);
-  await gh(`/actions/workflows/${GH_WORKFLOW}/dispatches`, { method: "POST", body: JSON.stringify({ ref: "main", inputs: { mode, payload } }) });
+  const inputs = { mode };
+  if (mode !== "data") inputs.payload = await encryptJson({ mode, ...request }, S.key, S.meta.salt, S.meta.iter);
+  await gh(`/actions/workflows/${GH_WORKFLOW}/dispatches`, { method: "POST", body: JSON.stringify({ ref: "main", inputs }) });
   S.job = { mode, t0, runId: null, from: S.data.generated_at };
   await saveJob(S.job); watchJob(); render();
 }
@@ -575,8 +587,9 @@ async function watchJob() {
 
 function updateJobBanner() {
   const el = document.getElementById("job-banner"); if (!el || !S.job) return;
-  const lbl = { queued: "Waiting for GitHub to start the run…", running: "Syncing Garmin and asking Claude…", loading: "Loading the new plan…" }[S.job.state || "queued"];
-  el.querySelector("span").textContent = (S.job.mode === "plan" ? "Generating plan. " : "Rebalancing today. ") + lbl + " Usually 1–2 minutes.";
+  const data = S.job.mode === "data";
+  const lbl = { queued: "Waiting for GitHub to start the run…", running: data ? "Syncing Garmin…" : "Syncing Garmin and asking Claude…", loading: data ? "Loading the new data…" : "Loading the new plan…" }[S.job.state || "queued"];
+  el.querySelector("span").textContent = (data ? "" : S.job.mode === "plan" ? "Generating plan. " : "Rebalancing today. ") + lbl + (data ? " Usually about a minute." : " Usually 1–2 minutes.");
 }
 
 /* sheets (modal dialogs) */
@@ -688,9 +701,6 @@ function planView() {
   const D = S.data, p = D.plan;
   const wrap = h("div", {});
   wrap.append(...planActions());
-  if (S.job) wrap.append(h("div", { class: "banner job", id: "job-banner", role: "status" }, h("span", {}, "")));
-  if (S.jobError) wrap.append(h("div", { class: "banner warn" }, h("strong", {}, "That didn't work. "), S.jobError.msg + " ", S.jobError.url ? h("a", { href: S.jobError.url, target: "_blank", rel: "noopener noreferrer" }, "Open the run") : null));
-  if (S.job) updateJobBanner();
   if (S.token) wrap.append(h("p", { class: "sub tokline" }, h("button", { class: "linkish", type: "button", onclick: async () => { await clearToken(); S.token = null; render(); } }, "Remove GitHub token from this device")));
   if (!p || !Array.isArray(p.days) || !p.days.length) { wrap.append(h("div", { class: "banner" }, "No plan yet. Tap Generate plan to pick the dates and your constraints.")); return wrap; }
   const gen = new Date(p.generated_at);
