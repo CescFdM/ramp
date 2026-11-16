@@ -183,7 +183,7 @@ def _schema(extra):
     return {"type": "object", "properties": {**base, **extra}, "required": ["readiness_note", "today_adjustment", *extra]}
 
 
-# Claude answers through a forced tool call, so the API hands back already-parsed JSON (no stray quotes or
+# Claude answers through a tool call, so the API hands back already-parsed JSON (no stray quotes or
 # cut-off text to trip json.loads). The day objects stay free-form; fix_day() normalises them.
 PLAN_SCHEMA = _schema({"last_week_summary": {"type": "string"}, "fitness_note": {"type": "string"}, "days": {"type": "array", "items": {"type": "object"}}})
 TODAY_SCHEMA = _schema({"day": {"type": "object"}})
@@ -196,7 +196,8 @@ def call_claude(prompt, max_tokens, schema=None):
     payload = {"model": MODEL, "max_tokens": max_tokens, "messages": [{"role": "user", "content": prompt}]}
     if schema:
         payload["tools"] = [{"name": "submit", "description": "Submit the finished result as structured data.", "input_schema": schema}]
-        payload["tool_choice"] = {"type": "tool", "name": "submit"}
+        # this model rejects a forced tool_choice, so ask for the tool in the prompt; text replies still parse as a fallback
+        payload["messages"] = [{"role": "user", "content": prompt + "\n\nDeliver the result by calling the `submit` tool with the JSON object as its input, not as text."}]
     body = json.dumps(payload).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
         "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"})
