@@ -130,6 +130,14 @@ def constraints_line(constraints):
     return "Fixed constraints and events (respect exactly, fit everything else around them): " + (json.dumps(constraints, ensure_ascii=False) if constraints else "none")
 
 
+def equipment_line(data):
+    eq = (data.get("equipment") or "").strip()
+    if not eq:
+        return "Strength equipment: not specified."
+    return ("Strength equipment available (the athlete trains at home, no gym machines): " + eq +
+            ". Every weights session must use ONLY this equipment and bodyweight. Never prescribe machines, cable stations or any other equipment that is not listed; pick the closest exercise that works with what is available.")
+
+
 def build_plan_prompt(data, cfg, dates, prev_plan, constraints, note):
     prev = [{"date": d["date"], "type": d["type"], "session": d["session"]} for d in (prev_plan or {}).get("days", []) if d["date"] >= data["today"] and d["date"] not in dates]
     return "\n".join([
@@ -137,6 +145,7 @@ def build_plan_prompt(data, cfg, dates, prev_plan, constraints, note):
         f"Athlete goal: {cfg.get('goal')}",
         f"Target training days per week: {cfg.get('daysPerWeek')}",
         constraints_line(constraints),
+        equipment_line(data),
         "Note from the athlete for this plan: " + (note or "none"), "",
         "Real data from the athlete's Garmin account. It is ground truth: do not invent sessions, sports or metrics that are not listed.",
         json.dumps({**context(data, cfg), "already_planned_days_outside_this_range": prev}, separators=(",", ":"), ensure_ascii=False), "",
@@ -161,6 +170,7 @@ def build_today_prompt(data, cfg, plan, constraints, note):
         "TASK: re-balance ONLY today's session. The athlete asked for a refresh, usually because recovery changed (bad night, tired, sore). Keep them active but match today's load to how recovered they are.", "",
         f"Athlete goal: {cfg.get('goal')}",
         constraints_line(constraints),
+        equipment_line(data),
         "Note from the athlete: " + (note or "none"), "",
         "Real Garmin data (ground truth):",
         json.dumps({**context(data, cfg), "todays_planned_session": planned, "next_days_in_plan": upcoming, "activities_already_done_today": done}, separators=(",", ":"), ensure_ascii=False), "",
@@ -307,6 +317,13 @@ def main():
         state["constraints"] = clean_constraints(req["constraints"])
         print(f"[plan] constraints saved: {len(state['constraints'])}")
     note = " ".join(str(req.get("note") or "").split())[:500]
+    if isinstance(req.get("equipment"), str):          # the popup always sends the current text
+        state["equipment"] = " ".join(req["equipment"].split())[:500]
+        print("[plan] equipment saved:", "yes" if state["equipment"] else "cleared")
+    if mode == "settings":                              # settings-only run: store them, no planning, no API call
+        save_state(state)
+        print("[plan] settings saved")
+        return
     data = assemble(state, cfg)
     today = data["today"]
     now = datetime.now(tz(cfg)).isoformat(timespec="seconds")

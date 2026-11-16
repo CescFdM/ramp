@@ -17,6 +17,10 @@ const ICONS = {
   plan: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',
   alert: '<path d="M12 3.5 2.8 19.5h18.4Z"/><path d="M12 10v4.5M12 17.4v.1"/>',
+  cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  lifter: '<path d="M3 3.5h18M4.6 1.8v3.4M19.4 1.8v3.4M6.6 2.6v1.8M17.4 2.6v1.8"/><circle cx="12" cy="8.2" r="1.7" fill="currentColor" stroke="none"/><path d="M7.6 3.5 9.8 11h4.4l2.2-7.5M12 11v5.5M12 16.5 9 22M12 16.5l3 5.5"/>',
+  pencil: '<path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z M14.5 7.5l3 3"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   key: '<circle cx="8" cy="15" r="3.6"/><path d="M10.7 12.5 20 3.5M16 7.5l2.5 2.5"/>',
@@ -131,13 +135,13 @@ function start() {
   mainEl = h("main", {});
   bannerEl = h("div", {});
   const refresh = refreshBtn = h("button", { class: "icon-btn", type: "button", "aria-label": "Sync Garmin and refresh", title: "Sync Garmin and refresh", onclick: syncGarmin }, icon("refresh", 18));
-  const lock = h("button", { class: "icon-btn", type: "button", "aria-label": "Sign out", onclick: async () => { await clearKey(); await clearToken(); await saveJob(null); location.reload(); } }, icon("lock", 18));
+  const gear = h("button", { class: "icon-btn", type: "button", "aria-label": "Settings", title: "Settings", "aria-haspopup": "menu", onclick: () => openMenu(gear) }, icon("cog", 18));
   tabsEl = h("nav", { class: "tabs", role: "tablist" }, ["stats|Athlete stats", "acts|Activities", "plan|Plan"].map((t) => {
     const [id, label] = t.split("|");
     return h("button", { role: "tab", "data-tab": id, onclick: () => { S.tab = id; closeDetail(); render(); window.scrollTo(0, 0); } }, icon(id, 22), label);
   }));
   app.replaceChildren(h("div", { class: "shell" },
-    h("header", { class: "topbar" }, h("div", {}, h("h1", {}, "Ramp"), metaEl), h("div", { style: { display: "flex", gap: "8px" } }, refresh, lock)),
+    h("header", { class: "topbar" }, h("div", {}, h("h1", {}, "Ramp"), metaEl), h("div", { style: { display: "flex", gap: "8px" } }, refresh, gear)),
     bannerEl, mainEl), tabsEl);
   Promise.all([loadToken(), loadJob()]).then(([t, j]) => { S.token = t || null; if (j && Date.now() - j.t0 < 20 * 60e3) { S.job = j; watchJob(); } else if (j) saveJob(null); if (S.tab === "plan") render(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - S.loadedAt > 10 * 60e3) reload(false); });
@@ -587,9 +591,14 @@ async function watchJob() {
 
 function updateJobBanner() {
   const el = document.getElementById("job-banner"); if (!el || !S.job) return;
-  const data = S.job.mode === "data";
-  const lbl = { queued: "Waiting for GitHub to start the run…", running: data ? "Syncing Garmin…" : "Syncing Garmin and asking Claude…", loading: data ? "Loading the new data…" : "Loading the new plan…" }[S.job.state || "queued"];
-  el.querySelector("span").textContent = (data ? "" : S.job.mode === "plan" ? "Generating plan. " : "Rebalancing today. ") + lbl + (data ? " Usually about a minute." : " Usually 1–2 minutes.");
+  const mode = S.job.mode, quick = mode === "data" || mode === "settings";
+  const lbl = {
+    queued: "Waiting for GitHub to start the run…",
+    running: mode === "settings" ? "Saving…" : mode === "data" ? "Syncing Garmin…" : "Syncing Garmin and asking Claude…",
+    loading: mode === "settings" ? "Loading your settings…" : mode === "data" ? "Loading the new data…" : "Loading the new plan…",
+  }[S.job.state || "queued"];
+  const pre = { settings: "Saving settings. ", plan: "Generating plan. ", refresh_today: "Rebalancing today. " }[mode] || "";
+  el.querySelector("span").textContent = pre + lbl + (quick ? " Usually about a minute." : " Usually 1–2 minutes.");
 }
 
 /* sheets (modal dialogs) */
@@ -633,7 +642,6 @@ function tokenSheet(after) {
 
 function generateSheet() {
   const D = S.data;
-  let cons = (D.constraints || []).slice();
   const from = h("input", { type: "date", min: D.today, max: addDays(D.today, 60), value: D.today });
   const to = h("input", { type: "date", min: D.today, value: addDays(D.today, 6) });
   const span = h("p", { class: "sub" });
@@ -647,28 +655,97 @@ function generateSheet() {
   };
   from.addEventListener("change", sync); to.addEventListener("change", sync); sync();
 
-  const list = h("ul", { class: "cons" });
-  const field = h("input", { type: "text", maxlength: "300", placeholder: "Add a constraint, e.g. Away Sat–Sun, no bike" });
-  const drawList = () => {
-    list.replaceChildren(...cons.map((c, i) => h("li", {}, h("span", {}, c),
-      h("button", { class: "icon-btn sm", type: "button", "aria-label": "Remove constraint: " + c, onclick: () => { cons.splice(i, 1); drawList(); } }, icon("x", 14)))));
-    if (!cons.length) list.append(h("li", { class: "empty" }, "No constraints yet."));
-  };
-  const add = () => { const v = field.value.trim().slice(0, 300); if (!v) return; if (!cons.some((c) => c.toLowerCase() === v.toLowerCase())) cons.push(v); field.value = ""; drawList(); };
-  field.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); add(); } });
-  drawList();
-
+  const nC = (D.constraints || []).length;
+  const saved = h("p", { class: "sub" }, `Uses your saved settings: ${nC} constraint${nC === 1 ? "" : "s"}, ${D.equipment ? "strength equipment set" : "no strength equipment set"}. Change them under the gear icon.`);
   const err = h("p", { class: "err", role: "alert" });
   const go = h("button", { class: "btn", type: "button" }, "Generate");
   go.addEventListener("click", async () => {
-    add(); go.disabled = true; err.textContent = "";
-    try { await startJob("plan", { from: from.value, to: to.value, constraints: cons }); closeSheet(); }
+    go.disabled = true; err.textContent = "";
+    try { await startJob("plan", { from: from.value, to: to.value }); closeSheet(); }
     catch (e) { err.textContent = e.message; go.disabled = false; }
   });
   sheet("Generate plan", h("div", { class: "form" },
-    h("div", { class: "dates" }, h("label", {}, "From", from), h("label", {}, "To", to)), span,
-    h("h3", {}, "Constraints"), h("p", { class: "sub" }, "Fixed commitments the plan must respect. They are kept encrypted with your history and reused next time."),
+    h("div", { class: "dates" }, h("label", {}, "From", from), h("label", {}, "To", to)), span, saved, err), [go], { focus: "input" });
+}
+
+/* ---- settings: menu (gear icon), constraints, strength equipment, logout. Saved through the "settings" run (no Claude call). */
+const logout = async () => { await clearKey(); await clearToken(); await saveJob(null); location.reload(); };
+
+function closeMenu() { document.getElementById("menu-bg")?.remove(); document.getElementById("menu")?.remove(); }
+function openMenu(anchor) {
+  closeMenu();
+  const r = anchor.getBoundingClientRect();
+  const needToken = (fn) => () => { closeMenu(); S.token ? fn() : tokenSheet(fn); };
+  const item = (ic, label, fn) => h("button", { class: "menu-item", type: "button", role: "menuitem", onclick: fn }, icon(ic, 18), label);
+  const bg = h("div", { class: "menu-bg", id: "menu-bg", onclick: closeMenu });
+  const menu = h("div", { class: "menu", id: "menu", role: "menu", style: { top: r.bottom + 6 + "px", right: Math.max(8, window.innerWidth - r.right) + "px" } },
+    item("alert", "Constraints", needToken(constraintsSheet)),
+    item("lifter", "Strength equipment", needToken(equipmentSheet)),
+    item("lock", "Logout", () => { closeMenu(); logout(); }));
+  menu.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeMenu(); });
+  document.body.append(bg, menu);
+  menu.querySelector("button").focus();
+}
+
+async function saveSettings(req, err, btns) {
+  if (S.job) { err.textContent = "Another run is in progress. Try again in a minute."; return; }
+  btns.forEach((b) => (b.disabled = true)); err.textContent = "";
+  try { await startJob("settings", req); closeSheet(); }
+  catch (e) { err.textContent = e.message; btns.forEach((b) => (b.disabled = false)); }
+}
+
+function constraintsSheet() {
+  let cons = (S.data.constraints || []).slice(), editing = -1, editInput = null;
+  const list = h("ul", { class: "cons" });
+  const field = h("input", { type: "text", maxlength: "300", placeholder: "Add a constraint, e.g. Away Sat–Sun, no bike" });
+  const commitEdit = () => {
+    if (editing < 0) return;
+    const v = editInput.value.trim().slice(0, 300);
+    if (v) cons[editing] = v; else cons.splice(editing, 1);
+    editing = -1; editInput = null;
+  };
+  const draw = () => {
+    list.replaceChildren(...cons.map((c, i) => {
+      if (i === editing) {
+        editInput = h("input", { type: "text", maxlength: "300", value: c, "aria-label": "Edit constraint" });
+        editInput.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") { ev.preventDefault(); commitEdit(); draw(); }
+          else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); editing = -1; editInput = null; draw(); }
+        });
+        setTimeout(() => editInput && editInput.focus(), 0);
+        return h("li", { class: "editing" }, editInput,
+          h("button", { class: "icon-btn sm", type: "button", "aria-label": "Save change", onclick: () => { commitEdit(); draw(); } }, icon("check", 14)),
+          h("button", { class: "icon-btn sm", type: "button", "aria-label": "Cancel edit", onclick: () => { editing = -1; editInput = null; draw(); } }, icon("x", 14)));
+      }
+      return h("li", {}, h("span", {}, c),
+        h("span", { class: "li-btns" },
+          h("button", { class: "icon-btn sm", type: "button", "aria-label": "Edit constraint: " + c, onclick: () => { commitEdit(); editing = cons.indexOf(c); draw(); } }, icon("pencil", 14)),
+          h("button", { class: "icon-btn sm", type: "button", "aria-label": "Remove constraint: " + c, onclick: () => { commitEdit(); cons.splice(cons.indexOf(c), 1); draw(); } }, icon("x", 14))));
+    }));
+    if (!cons.length) list.append(h("li", { class: "empty" }, "No constraints yet."));
+  };
+  const add = () => { const v = field.value.trim().slice(0, 300); if (!v) return; if (!cons.some((c) => c.toLowerCase() === v.toLowerCase())) cons.push(v); field.value = ""; draw(); };
+  field.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); add(); } });
+  draw();
+  const err = h("p", { class: "err", role: "alert" });
+  const go = h("button", { class: "btn", type: "button" }, "Save");
+  go.addEventListener("click", () => { commitEdit(); add(); saveSettings({ constraints: cons }, err, [go]); });
+  sheet("Constraints", h("div", { class: "form" },
+    h("p", { class: "sub" }, "Fixed commitments every plan must respect (events, travel, injuries). Kept encrypted with your history. Saving takes about a minute."),
     list, h("div", { class: "addrow" }, field, h("button", { class: "btn ghost", type: "button", onclick: add }, icon("plus", 16), "Add")), err), [go], { focus: "input" });
+}
+
+function equipmentSheet() {
+  const ta = h("textarea", { rows: "5", maxlength: "500", placeholder: "e.g. adjustable dumbbells 2-24 kg, pull-up bar, bench, resistance bands, kettlebell 16 kg" });
+  ta.value = S.data.equipment || "";
+  const err = h("p", { class: "err", role: "alert" });
+  const del = h("button", { class: "btn ghost", type: "button", disabled: !S.data.equipment }, "Delete");
+  const go = h("button", { class: "btn", type: "button" }, "Save");
+  del.addEventListener("click", () => { ta.value = ""; saveSettings({ equipment: "" }, err, [go, del]); });
+  go.addEventListener("click", () => saveSettings({ equipment: ta.value.trim() }, err, [go, del]));
+  sheet("Strength equipment", h("div", { class: "form" },
+    h("p", { class: "sub" }, "What you have at home. Weights sessions will use only this (plus bodyweight), also for Refresh today. Edit the text and save, or delete it. Saving takes about a minute."),
+    ta, err), [del, go], { focus: "textarea" });
 }
 
 function refreshSheet() {

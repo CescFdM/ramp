@@ -209,3 +209,13 @@ h1, h2, h3, p { margin: 0; }
 .icon-btn:disabled { cursor: default; opacity: .7; }
 @keyframes ramp-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .icon-btn.spinning svg { animation: none; } }
+
+/* settings menu + editable constraint rows */
+.menu-bg { position: fixed; inset: 0; z-index: 50; }
+.menu { position: fixed; z-index: 51; min-width: 220px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.28); display: grid; gap: 2px; }
+.menu-item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px; padding: 11px 12px; color: var(--ink); font: inherit; font-size: 15px; cursor: pointer; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--bg); outline: none; }
+.cons li .li-btns { display: inline-flex; gap: 6px; flex: none; }
+.cons li.editing { align-items: center; }
+.cons li.editing input { flex: 1; min-width: 0; }
+.form textarea { width: 100%; box-sizing: border-box; font: inherit; }

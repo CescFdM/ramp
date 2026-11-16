@@ -6,8 +6,9 @@ run-name: Ramp ${{ github.event_name == 'workflow_dispatch' && inputs.mode || gi
 #   data           sync Garmin and redeploy (free: no Claude call). Scheduled + on code pushes.
 #   plan           sync, then Claude plans the requested dates (max 7 days). Started from the app.
 #   refresh_today  sync, then Claude re-balances only today's session. Started from the app.
+#   settings       sync, then store constraints / strength equipment from the app (no Claude call).
 #
-# plan / refresh_today need an encrypted `payload` made by the app with your site key (dates, constraints,
+# plan / refresh_today / settings need an encrypted `payload` made by the app with your site key (dates, constraints,
 # note). Workflow inputs are public on a public repo, so they only ever carry ciphertext.
 #
 # GitHub cron is UTC with no time zones, so each morning slot is listed for winter (CET) and summer (CEST):
@@ -23,10 +24,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "data = sync only, plan / refresh_today = started from the app"
+        description: "data = sync only, plan / refresh_today / settings = started from the app"
         default: data
         type: choice
-        options: [data, plan, refresh_today]
+        options: [data, plan, refresh_today, settings]
       payload:
         description: "Encrypted request from the app (leave empty for data)"
         default: ""

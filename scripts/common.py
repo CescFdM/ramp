@@ -201,6 +201,7 @@ def assemble(state, cfg=None):
         "training_status": state.get("meta", {}).get("training_status"),
         "flags": compute_flags(daily, state.get("meta", {}).get("training_status"), cfg, today),
         "constraints": state.get("constraints", []),
+        "equipment": state.get("equipment", ""),
         "details": details,
         "plan": state.get("plan"),
         "sync": state.get("meta", {}).get("sync"),
