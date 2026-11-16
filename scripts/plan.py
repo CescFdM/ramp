@@ -178,11 +178,26 @@ def build_today_prompt(data, cfg, plan, constraints, note):
 
 
 # ------------------------------------------------------------------ Claude call and parsing
-def call_claude(prompt, max_tokens):
+def _schema(extra):
+    base = {"readiness_note": {"type": "string"}, "today_adjustment": {"type": "string"}}
+    return {"type": "object", "properties": {**base, **extra}, "required": ["readiness_note", "today_adjustment", *extra]}
+
+
+# Claude answers through a forced tool call, so the API hands back already-parsed JSON (no stray quotes or
+# cut-off text to trip json.loads). The day objects stay free-form; fix_day() normalises them.
+PLAN_SCHEMA = _schema({"last_week_summary": {"type": "string"}, "fitness_note": {"type": "string"}, "days": {"type": "array", "items": {"type": "object"}}})
+TODAY_SCHEMA = _schema({"day": {"type": "object"}})
+
+
+def call_claude(prompt, max_tokens, schema=None):
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
-    body = json.dumps({"model": MODEL, "max_tokens": max_tokens, "messages": [{"role": "user", "content": prompt}]}).encode()
+    payload = {"model": MODEL, "max_tokens": max_tokens, "messages": [{"role": "user", "content": prompt}]}
+    if schema:
+        payload["tools"] = [{"name": "submit", "description": "Submit the finished result as structured data.", "input_schema": schema}]
+        payload["tool_choice"] = {"type": "tool", "name": "submit"}
+    body = json.dumps(payload).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
         "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"})
     try:
@@ -190,13 +205,33 @@ def call_claude(prompt, max_tokens):
             resp = json.load(r)
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"Anthropic API {e.code}: {e.read().decode()[:300]}")
-    text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
     usage = resp.get("usage", {})
-    print(f"[plan] model={MODEL} in={usage.get('input_tokens')} out={usage.get('output_tokens')}")
-    return text
+    print(f"[plan] model={MODEL} in={usage.get('input_tokens')} out={usage.get('output_tokens')} stop={resp.get('stop_reason')}")
+    if resp.get("stop_reason") == "max_tokens":
+        raise RuntimeError("Claude's reply was cut off (too long). Try a shorter date range.")
+    for b in resp.get("content", []):
+        if b.get("type") == "tool_use" and isinstance(b.get("input"), dict):
+            return b["input"]
+    return "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+
+
+def ask(prompt, max_tokens, schema, parse):
+    """Call Claude and parse the answer; one retry, and log the raw reply if parsing keeps failing."""
+    last = None
+    for attempt in (1, 2):
+        out = call_claude(prompt, max_tokens, schema)
+        try:
+            return parse(out)
+        except Exception as e:
+            last = e
+            raw = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+            print(f"[plan] attempt {attempt} unusable ({e!r}); reply starts: {raw[:300]!r} ... ends: {raw[-300:]!r}", file=sys.stderr)
+    raise last
 
 
 def extract_json(text):
+    if isinstance(text, dict):
+        return text
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.M).strip()
     return json.loads(text[text.find("{"):text.rfind("}") + 1])
 
@@ -281,7 +316,7 @@ def main():
                 obj = {"readiness_note": "", "today_adjustment": "Dry run.", "day": fix_day({"type": "run", "session": "Easy run", "detail": "Placeholder."}, today)}
                 obj["day"]["adjusted"] = True
             else:
-                obj = parse_today(call_claude(build_today_prompt(data, cfg, state.get("plan"), state.get("constraints", []), note), 3000), today)
+                obj = ask(build_today_prompt(data, cfg, state.get("plan"), state.get("constraints", []), note), 3000, TODAY_SCHEMA, lambda t: parse_today(t, today))
             plan = state.get("plan") or {"days": [], "last_week_summary": "", "fitness_note": ""}
             plan["days"] = sorted([d for d in plan["days"] if d["date"] != today] + [obj["day"]], key=lambda d: d["date"])
             plan["readiness_note"] = obj.get("readiness_note", "")
@@ -294,7 +329,7 @@ def main():
             if dry:
                 new = dry_plan(dates)
             else:
-                new = parse_plan(call_claude(build_plan_prompt(data, cfg, dates, state.get("plan"), state.get("constraints", []), note), 6000), dates)
+                new = ask(build_plan_prompt(data, cfg, dates, state.get("plan"), state.get("constraints", []), note), 8000, PLAN_SCHEMA, lambda t: parse_plan(t, dates))
             new.update({"generated_at": now, "model": "dry-run" if dry else MODEL, "stale": False, "error": None,
                         "range": {"from": dates[0], "to": dates[-1]}})
             state["plan"] = merge_plan(state.get("plan"), new, today)
