@@ -236,7 +236,8 @@ def ask(prompt, max_tokens, schema, parse):
         except Exception as e:
             last = e
             raw = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
-            print(f"[plan] attempt {attempt} unusable ({e!r}); reply starts: {raw[:300]!r} ... ends: {raw[-300:]!r}", file=sys.stderr)
+            # Never print the reply itself: Actions logs of a public repo are public and the reply quotes private health data.
+            print(f"[plan] attempt {attempt} unusable ({type(e).__name__}); reply length {len(raw)} chars", file=sys.stderr)
     raise last
 
 
